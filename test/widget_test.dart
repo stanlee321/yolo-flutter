@@ -11,20 +11,17 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:yolo_demo/main.dart';
 
 void main() {
-  testWidgets('Counter increments smoke test', (WidgetTester tester) async {
+  testWidgets('YOLO Demo app smoke test', (WidgetTester tester) async {
     // Build our app and trigger a frame.
-    await tester.pumpWidget(const MyApp());
+    await tester.pumpWidget(YOLODemo());
 
-    // Verify that our counter starts at 0.
-    expect(find.text('0'), findsOneWidget);
-    expect(find.text('1'), findsNothing);
+    // Verify that our app loads with the correct title
+    expect(find.text('YOLO Demo con Tracking Avanzado'), findsOneWidget);
 
-    // Tap the '+' icon and trigger a frame.
-    await tester.tap(find.byIcon(Icons.add));
-    await tester.pump();
+    // Verify that performance metrics are shown
+    expect(find.text('FPS: 0.0'), findsOneWidget);
 
-    // Verify that our counter has incremented.
-    expect(find.text('0'), findsNothing);
-    expect(find.text('1'), findsOneWidget);
+    // Verify that the status section is present
+    expect(find.text('Estado del Tracking'), findsOneWidget);
   });
 }
