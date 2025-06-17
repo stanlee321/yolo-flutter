@@ -3,7 +3,7 @@ import 'package:ultralytics_yolo/yolo.dart';
 import 'package:ultralytics_yolo/yolo_view.dart';
 import 'package:image_picker/image_picker.dart';
 import 'dart:io';
-import 'dart:async';
+import 'tracker.dart';
 
 void main() => runApp(YOLODemo());
 
@@ -17,7 +17,10 @@ class _YOLODemoState extends State<YOLODemo> {
   File? selectedImage;
   List<dynamic> results = [];
   bool isLoading = false;
-  int currentPage = 0; // Use page index instead of boolean
+
+  final _tracker = IoUTracker();
+  int _totalDetections = 0;
+  String _lastDetected = "Ningún objeto detectado";
 
   @override
   void initState() {
@@ -28,26 +31,12 @@ class _YOLODemoState extends State<YOLODemo> {
   Future<void> loadYOLO() async {
     setState(() => isLoading = true);
 
-    // Check if model exists first
-    try {
-      final modelCheck = await YOLO.checkModelExists('yolo11n');
-      print('🔍 Model check result: $modelCheck');
-    } catch (e) {
-      print('❌ Model check failed: $e');
-    }
-
     yolo = YOLO(
-      modelPath: 'yolo11n',  // Just the base name, no extension (as per docs)
+      modelPath: 'yolo11n',
       task: YOLOTask.detect,
     );
 
-    try {
-      final success = await yolo!.loadModel();
-      print('✅ Model loaded successfully: $success');
-    } catch (e) {
-      print('❌ Model loading failed: $e');
-    }
-    
+    await yolo!.loadModel();
     setState(() => isLoading = false);
   }
 
@@ -62,44 +51,11 @@ class _YOLODemoState extends State<YOLODemo> {
       });
 
       final imageBytes = await selectedImage!.readAsBytes();
-      print('📷 Image loaded: ${imageBytes.length} bytes');
-      
-      print('🚀 Starting prediction...');
-      final stopwatch = Stopwatch()..start();
-      
-      final detectionResults = await yolo!.predict(
-        imageBytes,
-        confidenceThreshold: 0.15,  // Lower threshold for better detection
-        iouThreshold: 0.3,          // Lower IoU threshold
-      );
-      
-      stopwatch.stop();
-      print('⏱️ Prediction took: ${stopwatch.elapsedMilliseconds}ms');
-
-      // Print the Keys
-      print('🔑 Available keys: ${detectionResults.keys}');
-
-      print('📦 Boxes: ${detectionResults['boxes']}');
-      print('⚡ Speed: ${detectionResults['speed']}');
-      print('📐 Image size: ${detectionResults['imageSize']}');
-      print('🎯 Detections: ${detectionResults['detections']}');
+      final detectionResults = await yolo!.predict(imageBytes);
 
       setState(() {
-        // Safety check for valid detection results
-        final rawResults = detectionResults['boxes'] ?? [];
-        final validResults = rawResults.where((detection) {
-          // Filter out any detections with invalid coordinates
-          if (detection == null) return false;
-          if (detection['confidence'] == null || detection['confidence'].isNaN) return false;
-          if (detection['x'] != null && detection['x'].isNaN) return false;
-          if (detection['y'] != null && detection['y'].isNaN) return false;
-          return true;
-        }).toList();
-        
-        results = validResults;
+        results = detectionResults['boxes'] ?? [];
         isLoading = false;
-        
-        print('🔍 Filtered results: ${results.length} valid detections out of ${rawResults.length} total');
       });
     }
   }
@@ -109,158 +65,111 @@ class _YOLODemoState extends State<YOLODemo> {
     return MaterialApp(
       home: Scaffold(
         appBar: AppBar(
-          title: Text('YOLO Quick Demo'),
+          title: Text('YOLO Demo con Tracking'),
+          backgroundColor: Colors.blue.shade700,
         ),
-        body: IndexedStack(
-          index: currentPage,
+        body: Column(
           children: [
-            _buildImageView(),
-            StableCameraPage(), // Completely independent page
-          ],
-        ),
-        bottomNavigationBar: BottomNavigationBar(
-          currentIndex: currentPage,
-          onTap: (index) {
-            setState(() {
-              currentPage = index;
-              if (currentPage == 0) {
-                // Clear camera results when switching to image mode
-                selectedImage = null;
-                results = [];
-              }
-            });
-          },
-          items: [
-            BottomNavigationBarItem(
-              icon: Icon(Icons.photo),
-              label: 'Image',
-            ),
-            BottomNavigationBarItem(
-              icon: Icon(Icons.camera),
-              label: 'Live Camera',
-            ),
-          ],
-        ),
-      ),
-    );
-  }
-
-  Widget _buildImageView() {
-    return Center(
-      child: Column(
-        mainAxisAlignment: MainAxisAlignment.center,
-        children: [
-          if (selectedImage != null)
             Container(
-              height: 300,
-              child: Image.file(selectedImage!),
-            ),
-
-          SizedBox(height: 20),
-
-          if (isLoading)
-            CircularProgressIndicator()
-          else
-            Text('Detected ${results.length} objects'),
-
-          SizedBox(height: 20),
-
-          ElevatedButton(
-            onPressed: yolo != null ? pickAndDetect : null,
-            child: Text('Pick Image & Detect'),
-          ),
-
-          SizedBox(height: 20),
-
-          Expanded(
-            child: ListView.builder(
-              itemCount: results.length,
-              itemBuilder: (context, index) {
-                final detection = results[index];
-                return ListTile(
-                  title: Text(detection['class'] ?? 'Unknown'),
-                  subtitle: Text(
-                    'Confidence: ${(detection['confidence'] * 100).toStringAsFixed(1)}%'
+              width: double.infinity,
+              margin: EdgeInsets.all(16),
+              padding: EdgeInsets.all(16),
+              decoration: BoxDecoration(
+                color: Colors.grey.shade100,
+                borderRadius: BorderRadius.circular(12),
+                border: Border.all(color: Colors.grey.shade300),
+              ),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Estado del Tracking',
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.blue.shade700,
+                    ),
                   ),
-                );
-              },
+                  SizedBox(height: 8),
+                  Text('Total detectado: $_totalDetections objetos'),
+                  Text('Último: $_lastDetected'),
+                  Text(
+                      'Tracker activo: ${_tracker.tracks.length} objetos rastreados'),
+                ],
+              ),
             ),
-          ),
-        ],
-      ),
-    );
-  }
-}
+            Expanded(
+              child: Container(
+                margin: EdgeInsets.all(16),
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(12),
+                  border: Border.all(color: Colors.grey.shade300, width: 2),
+                ),
+                child: ClipRRect(
+                  borderRadius: BorderRadius.circular(10),
+                  child: YOLOView(
+                    modelPath: 'yolo11n',
+                    task: YOLOTask.detect,
+                    confidenceThreshold: 0.9,
+                    iouThreshold: 0.5,
+                    onResult: (detections) {
+                      try {
+                        final tracks =
+                            _tracker.update(detections.cast<YOLOResult>());
 
-// Completely independent camera page that NEVER rebuilds
-class StableCameraPage extends StatefulWidget {
-  @override
-  _StableCameraPageState createState() => _StableCameraPageState();
-}
+                        setState(() {
+                          _totalDetections = detections.length;
+                          if (detections.isNotEmpty) {
+                            _lastDetected = detections.first.className;
+                          }
+                        });
 
-class _StableCameraPageState extends State<StableCameraPage> {
-  // Static variables to avoid rebuilds
-  static int _detectionCount = 0;
-  static String _lastDetection = "None";
-
-  @override
-  Widget build(BuildContext context) {
-    return Column(
-      children: [
-        // Camera view that NEVER rebuilds
-        Expanded(
-          child: YOLOView(
-            modelPath: 'yolo11n',  // Try with explicit extension
-            task: YOLOTask.detect,
-            onResult: (results) {
-              // NO setState() calls - just print and update static variables
-              print('✅ DETECTION SUCCESS: ${results.length} objects found');
-              _detectionCount = results.length;
-              
-              if (results.isNotEmpty) {
-                _lastDetection = results[0].className ?? 'Unknown';
-                print('📍 First object: $_lastDetection (${(results[0].confidence * 100).toStringAsFixed(1)}%)');
-                
-                // Print all detections
-                for (int i = 0; i < results.length; i++) {
-                  final detection = results[i];
-                  print('  ${i + 1}. ${detection.className} - ${(detection.confidence * 100).toStringAsFixed(1)}%');
-                }
-              } else {
-                _lastDetection = "None";
-              }
-            },
-          ),
-        ),
-        
-        // Static info display - no rebuilds
-        Container(
-          padding: EdgeInsets.all(20),
-          color: Colors.black87,
-          child: Column(
-            children: [
-              Text(
-                'YOLO Live Detection',
-                style: TextStyle(
-                  fontSize: 20, 
-                  fontWeight: FontWeight.bold, 
-                  color: Colors.white
+                        if (detections.isNotEmpty) {
+                          print('🎯 Detectados: ${detections.length} objetos');
+                          for (int i = 0; i < tracks.length; i++) {
+                            final track = tracks[i];
+                            print(
+                                '  ID ${track.id} → ${track.className} (conf: ${(track.confidence * 100).toStringAsFixed(1)}%)');
+                          }
+                        }
+                      } catch (e) {
+                        print('❌ Error en tracking: $e');
+                      }
+                    },
+                  ),
                 ),
               ),
-              SizedBox(height: 10),
-              Text(
-                'Point camera at objects (people, cars, phones, etc.)',
-                style: TextStyle(color: Colors.white70),
+            ),
+            Container(
+              padding: EdgeInsets.all(16),
+              child: Column(
+                children: [
+                  Text(
+                    'Instrucciones:',
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  SizedBox(height: 8),
+                  Text(
+                    '• Apunta la cámara a objetos (personas, autos, teléfonos, etc.)',
+                    textAlign: TextAlign.center,
+                  ),
+                  Text(
+                    '• Los objetos detectados aparecerán con IDs únicos',
+                    textAlign: TextAlign.center,
+                  ),
+                  Text(
+                    '• Revisa la consola para logs detallados',
+                    textAlign: TextAlign.center,
+                  ),
+                ],
               ),
-              SizedBox(height: 10),
-              Text(
-                'Check console for detection logs',
-                style: TextStyle(color: Colors.green, fontWeight: FontWeight.bold),
-              ),
-            ],
-          ),
+            ),
+          ],
         ),
-      ],
+      ),
     );
   }
 }

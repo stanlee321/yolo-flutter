@@ -33,6 +33,7 @@ dependencies:
 
   ultralytics_yolo: ^0.1.25
   image_picker: ^0.8.7 # For image selection
+  simple_kalman: ^1.0.2
   # The following adds the Cupertino Icons font to your application.
   # Use with the CupertinoIcons class for iOS style icons.
   cupertino_icons: ^1.0.6
